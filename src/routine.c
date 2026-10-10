@@ -9181,8 +9181,11 @@ NTSTATUS _r_sys_getmemoryinfo (
 		out_buffer->system_cache.free_bytes = (ULONG64)sfci.PeakSize - (ULONG64)sfci.CurrentSize;
 		out_buffer->system_cache.used_bytes = sfci.CurrentSize;
 
-		out_buffer->system_cache.percent = (ULONG)PR_CALC_PERCENTOF (out_buffer->system_cache.used_bytes, out_buffer->system_cache.total_bytes);
-		out_buffer->system_cache.percent_f = PR_CALC_PERCENTOF (out_buffer->system_cache.used_bytes, out_buffer->system_cache.total_bytes);
+		if (out_buffer->system_cache.total_bytes)
+		{
+			out_buffer->system_cache.percent = (ULONG)PR_CALC_PERCENTOF (out_buffer->system_cache.used_bytes, out_buffer->system_cache.total_bytes);
+			out_buffer->system_cache.percent_f = PR_CALC_PERCENTOF (out_buffer->system_cache.used_bytes, out_buffer->system_cache.total_bytes);
+		}
 	}
 
 	// page file information
@@ -9214,8 +9217,11 @@ NTSTATUS _r_sys_getmemoryinfo (
 			pagefile = pagefile->NextEntryOffset ? PTR_ADD_OFFSET (pagefile, pagefile->NextEntryOffset) : NULL;
 		}
 
-		out_buffer->page_file.percent = (ULONG)PR_CALC_PERCENTOF (out_buffer->page_file.used_bytes, out_buffer->page_file.total_bytes);
-		out_buffer->page_file.percent_f = PR_CALC_PERCENTOF (out_buffer->page_file.used_bytes, out_buffer->page_file.total_bytes);
+		if (out_buffer->page_file.total_bytes)
+		{
+			out_buffer->page_file.percent = (ULONG)PR_CALC_PERCENTOF (out_buffer->page_file.used_bytes, out_buffer->page_file.total_bytes);
+			out_buffer->page_file.percent_f = PR_CALC_PERCENTOF (out_buffer->page_file.used_bytes, out_buffer->page_file.total_bytes);
+		}
 	}
 
 	_r_mem_free (pagefiles);
