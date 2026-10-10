@@ -4553,7 +4553,7 @@ VOID _r_tray_destroy (
 	_In_ LPCGUID guid
 );
 
-VOID _r_tray_popup (
+BOOLEAN _r_tray_popup (
 	_In_ HWND hwnd,
 	_In_ LPCGUID guid,
 	_In_opt_ ULONG flags,

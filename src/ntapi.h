@@ -2746,7 +2746,9 @@ typedef struct _KUSER_SHARED_DATA
 	LARGE_INTEGER TimeZoneBiasEffectiveEnd;
 
 	// Extended processor state configuration (AMD64 and x86).
-	XSTATE_CONFIGURATION XState;
+	// Kept opaque: XSTATE_CONFIGURATION grew in Windows SDK 10.0.28000, but the
+	// KUSER_SHARED_DATA ABI reserves a fixed 0x348 bytes here.
+	UCHAR XState[0x348];
 
 	KSYSTEM_TIME FeatureConfigurationChangeStamp;
 	ULONG Spare;
@@ -2757,7 +2759,7 @@ typedef struct _KUSER_SHARED_DATA
 	// other architectures is not available for reuse.
 
 #if defined(_ARM64_)
-	XSTATE_CONFIGURATION XStateArm64;
+	UCHAR XStateArm64[0x348];
 #else
 	ULONG Reserved10[210];
 #endif // _ARM64_

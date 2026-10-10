@@ -17234,7 +17234,7 @@ VOID _r_tray_destroy (
 	Shell_NotifyIconW (NIM_DELETE, &nid);
 }
 
-VOID _r_tray_popup (
+BOOLEAN _r_tray_popup (
 	_In_ HWND hwnd,
 	_In_ LPCGUID guid,
 	_In_opt_ ULONG flags,
@@ -17261,7 +17261,7 @@ VOID _r_tray_popup (
 	if (string)
 		_r_str_copy (nid.szInfo, RTL_NUMBER_OF (nid.szInfo), string);
 
-	Shell_NotifyIconW (NIM_MODIFY, &nid);
+	return !!Shell_NotifyIconW (NIM_MODIFY, &nid);
 }
 
 VOID _r_tray_popupformat (
