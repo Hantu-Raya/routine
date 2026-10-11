@@ -737,23 +737,34 @@ FORCEINLINE LPCWSTR _r_app_getdonate_url ()
 	return L"https://github.com/henrypp/" APP_NAME_SHORT L"#donate";
 }
 
+// forks override these in app.h so links and update checks reach the fork, not upstream
 FORCEINLINE LPCWSTR _r_app_getwebsite_url ()
 {
+#if defined(APP_WEBSITE_URL)
+	return APP_WEBSITE_URL;
+#else
 	return L"https://github.com/henrypp/" APP_NAME_SHORT;
+#endif // APP_WEBSITE_URL
 }
 
 FORCEINLINE LPCWSTR _r_app_getupdate_url ()
 {
+#if defined(APP_UPDATE_URL)
+	return APP_UPDATE_URL;
+#else
 	return L"https://raw.githubusercontent.com/henrypp/" APP_NAME_SHORT L"/master/VERSION";
+#endif // APP_UPDATE_URL
 }
 
 FORCEINLINE LPCWSTR _r_app_getversiontype ()
 {
-#if defined(_DEBUG) || defined(APP_BETA)
+#if defined(APP_VERSION_TYPE)
+	return APP_VERSION_TYPE;
+#elif defined(_DEBUG) || defined(APP_BETA)
 	return L"Pre-release";
 #else
 	return L"Release";
-#endif // _DEBUG || APP_BETA
+#endif // APP_VERSION_TYPE
 }
 
 FORCEINLINE LONG _r_app_getarch ()
