@@ -1052,6 +1052,7 @@ typedef struct _R_UPDATE_COMPONENT
 	PR_STRING cache_path;
 	PR_STRING target_path;
 	PR_STRING url;
+	PR_STRING hash; // SHA-256 (hex) listed in the update manifest, if any
 	ULONG flags;
 } R_UPDATE_COMPONENT, *PR_UPDATE_COMPONENT;
 

@@ -2090,6 +2090,189 @@ BOOLEAN NTAPI _r_update_downloadcallback (
 	return TRUE;
 }
 
+#if defined(APP_UPDATE_PUBKEY)
+// The update manifest must end with "signature=<128 hex: r || s>;", an ECDSA P-256 signature
+// (SHA-256) over all text before it with CR removed, made with the key whose public half
+// (X || Y) the application defines as APP_UPDATE_PUBKEY.
+_Success_ (NT_SUCCESS (return))
+NTSTATUS _r_update_verifymanifest (
+	_In_ PR_STRINGREF manifest
+)
+{
+	static const UCHAR public_key[64] = APP_UPDATE_PUBKEY;
+	UCHAR key_blob[sizeof (BCRYPT_ECCKEY_BLOB) + sizeof (public_key)];
+	UCHAR signature[64];
+	R_CRYPT_CONTEXT hash_context;
+	PBCRYPT_ECCKEY_BLOB key_header;
+	BCRYPT_ALG_HANDLE halg = NULL;
+	BCRYPT_KEY_HANDLE hkey = NULL;
+	PR_BYTE hash = NULL;
+	PUCHAR body;
+	ULONG_PTR length;
+	ULONG_PTR marker = SIZE_MAX;
+	ULONG_PTR position;
+	ULONG_PTR body_length = 0;
+	WCHAR ch;
+	NTSTATUS status;
+
+	length = _r_str_getlength2 (manifest);
+
+	// a manifest is a few hundred bytes; the cap also keeps every signed length within ULONG
+	if (length > 0x10000)
+		return STATUS_INVALID_SIGNATURE;
+
+	for (ULONG_PTR i = 0; i + 10 <= length; i++)
+	{
+		if (wcsncmp (manifest->buffer + i, L"signature=", 10) == 0)
+			marker = i;
+	}
+
+	if (marker == SIZE_MAX || length - (marker + 10) < 128)
+		return STATUS_INVALID_SIGNATURE;
+
+	position = marker + 10;
+
+	for (ULONG i = 0; i < sizeof (signature) * 2; i++)
+	{
+		ch = manifest->buffer[position + i];
+
+		if (ch >= L'0' && ch <= L'9')
+			ch -= L'0';
+		else if (ch >= L'a' && ch <= L'f')
+			ch -= L'a' - 10;
+		else if (ch >= L'A' && ch <= L'F')
+			ch -= L'A' - 10;
+		else
+			return STATUS_INVALID_SIGNATURE;
+
+		if (i % 2)
+			signature[i / 2] |= (UCHAR)ch;
+		else
+			signature[i / 2] = (UCHAR)(ch << 4);
+	}
+
+	// nothing but the record terminator and whitespace may follow the signature
+	position += sizeof (signature) * 2;
+
+	if (position < length && manifest->buffer[position] == L';')
+		position += 1;
+
+	while (position < length && (manifest->buffer[position] == L'\r' || manifest->buffer[position] == L'\n' || manifest->buffer[position] == L' ' || manifest->buffer[position] == L'\t'))
+		position += 1;
+
+	if (position != length)
+		return STATUS_INVALID_SIGNATURE;
+
+	// signed bytes: the ASCII text before the signature, with the CR of each CRLF removed; any other
+	// CR is rejected, so the text that is parsed is exactly the text that was signed
+	body = _r_mem_allocate (marker + 1);
+
+	for (ULONG_PTR i = 0; i < marker; i++)
+	{
+		ch = manifest->buffer[i];
+
+		if (ch > 0x7F || (ch == L'\r' && manifest->buffer[i + 1] != L'\n'))
+		{
+			_r_mem_free (body);
+
+			return STATUS_INVALID_SIGNATURE;
+		}
+
+		if (ch != L'\r')
+			body[body_length++] = (UCHAR)ch;
+	}
+
+	status = _r_crypt_createhashcontext (&hash_context, BCRYPT_SHA256_ALGORITHM);
+
+	if (NT_SUCCESS (status))
+	{
+		status = _r_crypt_hashbuffer (&hash_context, body, (ULONG)body_length);
+
+		if (NT_SUCCESS (status))
+			status = _r_crypt_finalhashcontext (&hash_context, NULL, &hash);
+
+		_r_crypt_destroycryptcontext (&hash_context);
+	}
+
+	_r_mem_free (body);
+
+	if (!NT_SUCCESS (status))
+		return status;
+
+	key_header = (PBCRYPT_ECCKEY_BLOB)key_blob;
+	key_header->dwMagic = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
+	key_header->cbKey = 32;
+
+	RtlCopyMemory (key_blob + sizeof (BCRYPT_ECCKEY_BLOB), public_key, sizeof (public_key));
+
+	status = BCryptOpenAlgorithmProvider (&halg, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0);
+
+	if (NT_SUCCESS (status))
+		status = BCryptImportKeyPair (halg, NULL, BCRYPT_ECCPUBLIC_BLOB, &hkey, key_blob, sizeof (key_blob), 0);
+
+	if (NT_SUCCESS (status))
+		status = BCryptVerifySignature (hkey, NULL, (PUCHAR)hash->buffer, (ULONG)hash->length, signature, sizeof (signature), 0);
+
+	if (hkey)
+		BCryptDestroyKey (hkey);
+
+	if (halg)
+		BCryptCloseAlgorithmProvider (halg, 0);
+
+	_r_obj_dereference (hash);
+
+	return status;
+}
+
+// A downloaded file is used only when it matches the SHA-256 the signed manifest lists for it.
+// Executable (installer) components must have one; data files without one are accepted, since
+// the signed manifest already fixes where they come from.
+// The file is hashed through a handle that denies writing, deleting and renaming. Keep the
+// handle returned in out_hfile open while the file is used, so it cannot be swapped after the check.
+_Success_ (NT_SUCCESS (return))
+NTSTATUS _r_update_verifyfile (
+	_In_ PR_UPDATE_COMPONENT update_component,
+	_Out_opt_ PHANDLE out_hfile
+)
+{
+	PR_STRING file_hash;
+	HANDLE hfile;
+	NTSTATUS status;
+
+	if (out_hfile)
+		*out_hfile = NULL;
+
+	if (!update_component->hash)
+		return (update_component->flags & PR_UPDATE_FLAG_INSTALLER) ? STATUS_INVALID_IMAGE_HASH : STATUS_SUCCESS;
+
+	status = _r_fs_openfile (&update_component->cache_path->sr, GENERIC_READ, FILE_SHARE_READ, 0, FALSE, &hfile);
+
+	if (!NT_SUCCESS (status))
+		return status;
+
+	status = _r_crypt_getfilehash (BCRYPT_SHA256_ALGORITHM, NULL, hfile, &file_hash);
+
+	if (NT_SUCCESS (status))
+	{
+		if (!_r_str_isequal (&file_hash->sr, &update_component->hash->sr, TRUE))
+			status = STATUS_INVALID_IMAGE_HASH;
+
+		_r_obj_dereference (file_hash);
+	}
+
+	if (NT_SUCCESS (status) && out_hfile)
+	{
+		*out_hfile = hfile;
+	}
+	else
+	{
+		NtClose (hfile);
+	}
+
+	return status;
+}
+#endif // APP_UPDATE_PUBKEY
+
 NTSTATUS _r_update_downloadupdate (
 	_In_ PR_UPDATE_INFO update_info,
 	_Inout_ PR_UPDATE_COMPONENT update_component
@@ -2125,6 +2308,17 @@ NTSTATUS _r_update_downloadupdate (
 
 	if (status != STATUS_SUCCESS)
 		return status;
+
+#if defined(APP_UPDATE_PUBKEY)
+	status = _r_update_verifyfile (update_component, NULL);
+
+	if (!NT_SUCCESS (status))
+	{
+		_r_fs_deletefile (&update_component->cache_path->sr, NULL);
+
+		return status;
+	}
+#endif // APP_UPDATE_PUBKEY
 
 	if (update_component->flags & PR_UPDATE_FLAG_FILE)
 	{
@@ -2224,6 +2418,11 @@ NTSTATUS NTAPI _r_update_downloadthread (
 		str_content = L"Update server connection error.";
 #pragma PR_PRINT_WARNING_UNDEFINED(IDS_UPDATE_ERROR)
 #endif // IDS_UPDATE_ERROR
+
+#if defined(APP_UPDATE_PUBKEY)
+		if (status == STATUS_INVALID_IMAGE_HASH)
+			str_content = L"The downloaded update does not match the signed update information. It was deleted and not installed.";
+#endif // APP_UPDATE_PUBKEY
 	}
 
 	_r_update_navigate (update_info, buttons, 0, main_icon, str_content, NULL, status, ET_WINHTTP);
@@ -2277,6 +2476,20 @@ NTSTATUS NTAPI _r_update_checkthread (
 		goto CleanupExit;
 	}
 
+#if defined(APP_UPDATE_PUBKEY)
+	// updates are installed with administrator rights: accept only a manifest signed with the
+	// key built into the application
+	status = _r_update_verifymanifest (&download_info.string->sr);
+
+	if (!NT_SUCCESS (status))
+	{
+		if (update_info->hparent)
+			_r_update_navigate (update_info, TDCBF_CLOSE_BUTTON, 0, TD_WARNING_ICON, L"Update information could not be verified.", L"The update was not downloaded.", status, ET_NATIVE);
+
+		goto CleanupExit;
+	}
+#endif // APP_UPDATE_PUBKEY
+
 	string_table = _r_str_unserialize (&download_info.string->sr, L';', L'=');
 
 	if (string_table)
@@ -2300,6 +2513,11 @@ NTSTATUS NTAPI _r_update_checkthread (
 				continue;
 
 			_r_str_splitatchar (&remaining_part, L'|', &new_url_sr, &remaining_part);
+
+			// optional third field: SHA-256 of the file (required for executables when signing is on)
+			_r_str_trimstring2 (&remaining_part, L"\r\n\t ", 0);
+
+			_r_obj_movereference (&update_component->hash, remaining_part.length ? _r_obj_createstring2 (&remaining_part) : NULL);
 
 			_r_obj_movereference (&update_component->url, _r_obj_createstring2 (&new_url_sr));
 			_r_obj_movereference (&update_component->new_version, _r_obj_createstring2 (&new_version_sr));
@@ -2828,12 +3046,39 @@ VOID _r_update_install (
 	PR_STRING cmd_string;
 	NTSTATUS status;
 
+#if defined(APP_UPDATE_PUBKEY)
+	HANDLE hfile = NULL;
+#endif // APP_UPDATE_PUBKEY
+
 	if (!_r_fs_exists (&update_component->cache_path->sr))
 		return;
 
+#if defined(APP_UPDATE_PUBKEY)
+	// the cached file sits in a user-writable folder: check it again right before running it, and
+	// hold it unchangeable until the elevated process has started. That process gets the hash
+	// (/H=) and checks its own file again before it replaces anything.
+	status = update_component->hash ? _r_update_verifyfile (update_component, &hfile) : STATUS_INVALID_IMAGE_HASH;
+
+	if (!NT_SUCCESS (status))
+	{
+		_r_fs_deletefile (&update_component->cache_path->sr, NULL);
+
+		_r_show_errormessage (hwnd, L"The downloaded update does not match the signed update information. It was deleted.", status, NULL, ET_NATIVE);
+
+		return;
+	}
+
+	cmd_string = _r_format_string (L"\"%s\" /u /S /H=%s /D=%s", update_component->cache_path->buffer, update_component->hash->buffer, update_component->target_path->buffer);
+#else
 	cmd_string = _r_format_string (L"\"%s\" /u /S /D=%s", update_component->cache_path->buffer, update_component->target_path->buffer);
+#endif // APP_UPDATE_PUBKEY
 
 	status = _r_sys_runasadmin (update_component->cache_path->buffer, cmd_string->buffer, NULL);
+
+#if defined(APP_UPDATE_PUBKEY)
+	if (hfile)
+		NtClose (hfile);
+#endif // APP_UPDATE_PUBKEY
 
 	if (status != STATUS_SUCCESS)
 		_r_show_errormessage (hwnd, L"Could not install update!", status, update_component->cache_path->buffer, ET_NATIVE);

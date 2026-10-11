@@ -15552,7 +15552,7 @@ NTSTATUS _r_crypt_getfilehash (
 	R_CRYPT_CONTEXT hash_context;
 	HANDLE hfile_new = NULL;
 	PVOID buffer;
-	PR_STRING string;
+	PR_STRING string = NULL;
 	ULONG_PTR readed;
 	ULONG buffer_length;
 	NTSTATUS status;
@@ -15580,6 +15580,9 @@ NTSTATUS _r_crypt_getfilehash (
 	{
 		*out_buffer = NULL;
 
+		if (hfile_new)
+			NtClose (hfile_new);
+
 		return status;
 	}
 
@@ -15590,7 +15593,15 @@ NTSTATUS _r_crypt_getfilehash (
 	{
 		status = _r_fs_readfile (hfile, buffer, buffer_length, &readed);
 
-		if (!NT_SUCCESS (status) || readed == 0)
+		// only a clean end of file completes the hash; any other failure must not yield a partial one
+		if (status == STATUS_END_OF_FILE || (NT_SUCCESS (status) && readed == 0))
+		{
+			status = STATUS_SUCCESS;
+
+			break;
+		}
+
+		if (!NT_SUCCESS (status))
 			break;
 
 		status = _r_crypt_hashbuffer (&hash_context, buffer, (ULONG)readed);
@@ -15599,7 +15610,8 @@ NTSTATUS _r_crypt_getfilehash (
 			break;
 	}
 
-	status = _r_crypt_finalhashcontext (&hash_context, &string, NULL);
+	if (NT_SUCCESS (status))
+		status = _r_crypt_finalhashcontext (&hash_context, &string, NULL);
 
 	if (NT_SUCCESS (status))
 	{
