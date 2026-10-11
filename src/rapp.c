@@ -404,7 +404,14 @@ BOOLEAN _r_app_initialize (
 	{
 		_r_obj_initializestringref (&sr, _r_app_getname ());
 
-		EnumWindows (&_r_util_activate_window_callback, (LPARAM)&sr);
+		// EnumWindows returns nonzero when no window matched; a renamed build also activates
+		// a running copy of the build it replaces (same mutex, old window name)
+		if (EnumWindows (&_r_util_activate_window_callback, (LPARAM)&sr) && _r_str_compare (APP_NAME, APP_STORAGE_NAME, 0) != 0)
+		{
+			_r_obj_initializestringref (&sr, (LPWSTR)APP_STORAGE_NAME);
+
+			EnumWindows (&_r_util_activate_window_callback, (LPARAM)&sr);
+		}
 
 		return FALSE;
 	}
