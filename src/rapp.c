@@ -2893,29 +2893,40 @@ VOID _r_update_navigate (
 	_In_ R_ERROR_TYPE type
 )
 {
-	TASKDIALOGCONFIG tdc = {0};
-	WCHAR buffer[0x0800];
+	LPTASKDIALOGCONFIG tdc;
+	LPWSTR buffer;
 	PR_STRING string = NULL;
 	PVOID hlib;
 	BOOL is_checked;
+	ULONG index;
 	NTSTATUS status;
 
-	tdc.cbSize = sizeof (tdc);
-	tdc.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT | flags;
-	tdc.hwndParent = update_info->hparent ? update_info->hparent : _r_app_gethwnd ();
-	tdc.hInstance = _r_sys_getimagebase ();
-	tdc.dwCommonButtons = buttons;
-	tdc.pfCallback = &_r_update_pagecallback;
-	tdc.lpCallbackData = (LONG_PTR)update_info;
+	// never use stack memory for a page: see R_UPDATE_INFO
+	index = (update_info->page_index++) & 1;
 
-	tdc.pszWindowTitle = _r_app_getname ();
+	tdc = &update_info->page_config[index];
+	buffer = update_info->page_content[index];
+
+	RtlZeroMemory (tdc, sizeof (*tdc));
+
+	buffer[0] = UNICODE_NULL;
+
+	tdc->cbSize = sizeof (*tdc);
+	tdc->dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT | flags;
+	tdc->hwndParent = update_info->hparent ? update_info->hparent : _r_app_gethwnd ();
+	tdc->hInstance = _r_sys_getimagebase ();
+	tdc->dwCommonButtons = buttons;
+	tdc->pfCallback = &_r_update_pagecallback;
+	tdc->lpCallbackData = (LONG_PTR)update_info;
+
+	tdc->pszWindowTitle = _r_app_getname ();
 
 #if defined(IDI_MAIN)
-	tdc.pszMainIcon = icon ? icon : MAKEINTRESOURCE (IDI_MAIN);
+	tdc->pszMainIcon = icon ? icon : MAKEINTRESOURCE (IDI_MAIN);
 #endif // IDI_MAIN
 
 	if (title)
-		tdc.pszMainInstruction = title;
+		tdc->pszMainInstruction = title;
 
 	if (error_code != STATUS_SUCCESS)
 	{
@@ -2929,7 +2940,7 @@ VOID _r_update_navigate (
 			{
 				_r_str_printf (
 					buffer,
-					RTL_NUMBER_OF (buffer),
+					RTL_NUMBER_OF (update_info->page_content[0]),
 					L"%s\r\n\r\nDescription:\r\n%s\r\nStatus:\r\n%" TEXT (PR_LONG) L" (0x%08" TEXT (PRIX32)")",
 					content,
 					_r_obj_getstringordefault (string, L"n/a"),
@@ -2941,7 +2952,7 @@ VOID _r_update_navigate (
 			{
 				_r_str_printf (
 					buffer,
-					RTL_NUMBER_OF (buffer),
+					RTL_NUMBER_OF (update_info->page_content[0]),
 					L"Description:\r\n%s\r\nStatus:\r\n%" TEXT (PR_LONG) L" (0x%08" TEXT (PRIX32)")",
 					_r_obj_getstringordefault (string, L"n/a"),
 					error_code,
@@ -2949,15 +2960,17 @@ VOID _r_update_navigate (
 				);
 			}
 
-			tdc.pszContent = buffer;
+			tdc->pszContent = buffer;
 
 			_r_sys_freelibrary (hlib);
 		}
 	}
-	else
+	else if (content)
 	{
-		if (content)
-			tdc.pszContent = content;
+		// callers may pass their own stack buffers (the update list in _r_update_checkthread)
+		_r_str_copy (buffer, RTL_NUMBER_OF (update_info->page_content[0]), content);
+
+		tdc->pszContent = buffer;
 	}
 
 	if (buttons & TDCBF_YES_BUTTON)
@@ -2965,9 +2978,9 @@ VOID _r_update_navigate (
 		if (update_info->flags & PR_UPDATE_FLAG_FILE)
 		{
 #if defined(IDS_UPDATE_AUTOINSTALL)
-			tdc.pszVerificationText = _r_locale_getstring (IDS_UPDATE_AUTOINSTALL);
+			tdc->pszVerificationText = _r_locale_getstring (IDS_UPDATE_AUTOINSTALL);
 #else
-			tdc.pszVerificationText = L"Automatically install non-executable updates";
+			tdc->pszVerificationText = L"Automatically install non-executable updates";
 #pragma PR_PRINT_WARNING_UNDEFINED(IDS_UPDATE_AUTOINSTALL)
 #endif // IDS_UPDATE_AUTOINSTALL
 		}
@@ -2975,11 +2988,11 @@ VOID _r_update_navigate (
 
 	if (update_info->htaskdlg)
 	{
-		_r_wnd_sendmessage (update_info->htaskdlg, 0, TDM_NAVIGATE_PAGE, 0, (LPARAM)&tdc);
+		_r_wnd_sendmessage (update_info->htaskdlg, 0, TDM_NAVIGATE_PAGE, 0, (LPARAM)tdc);
 	}
 	else
 	{
-		_r_msg_taskdialog (&tdc, NULL, NULL, &is_checked);
+		_r_msg_taskdialog (tdc, NULL, NULL, &is_checked);
 	}
 
 	if (string)

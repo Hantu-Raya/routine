@@ -1067,6 +1067,15 @@ typedef struct _R_UPDATE_INFO
 	ULONG flags;
 	volatile LONG lock;
 	BOOLEAN is_clicked;
+
+	// The task dialog keeps a pointer to the TASKDIALOGCONFIG of a page (TDM_NAVIGATE_PAGE) and
+	// reads it again later from its window procedure. Pages sent from the check/download threads
+	// lived on their stacks and were read after those threads exited (crash in 3.5.3.1, reading
+	// dwFlags from a freed stack). Pages therefore live here, alternating between two slots so the
+	// page being shown is never overwritten.
+	TASKDIALOGCONFIG page_config[2];
+	WCHAR page_content[2][0x0800];
+	ULONG page_index;
 } R_UPDATE_INFO, *PR_UPDATE_INFO;
 
 typedef struct _R_SHARED_IMAGE
