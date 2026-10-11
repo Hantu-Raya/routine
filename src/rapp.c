@@ -463,7 +463,7 @@ PR_STRING _r_app_getconfigpath ()
 		}
 		else
 		{
-			status = _r_path_getknownfolder (&FOLDERID_RoamingAppData, 0, L"\\" APP_AUTHOR L"\\" APP_NAME L"\\" APP_NAME_SHORT L".ini", &string);
+			status = _r_path_getknownfolder (&FOLDERID_RoamingAppData, 0, L"\\" APP_AUTHOR L"\\" APP_STORAGE_NAME L"\\" APP_NAME_SHORT L".ini", &string);
 
 			if (SUCCEEDED (status))
 				cached_result = string;
@@ -569,7 +569,7 @@ PR_STRING _r_app_getprofiledirectory ()
 		}
 		else
 		{
-			_r_path_getknownfolder (&FOLDERID_RoamingAppData, 0, L"\\" APP_AUTHOR L"\\" APP_NAME, &cached_path);
+			_r_path_getknownfolder (&FOLDERID_RoamingAppData, 0, L"\\" APP_AUTHOR L"\\" APP_STORAGE_NAME, &cached_path);
 		}
 
 		_r_initonce_end (&init_once);
@@ -1995,7 +1995,7 @@ NTSTATUS _r_autorun_enable (
 			L"\" -minimized"
 		);
 
-		status = _r_reg_setvalue (hkey, _r_app_getname (), REG_SZ, string->buffer, (ULONG)string->length + sizeof (UNICODE_NULL));
+		status = _r_reg_setvalue (hkey, APP_STORAGE_NAME, REG_SZ, string->buffer, (ULONG)string->length + sizeof (UNICODE_NULL));
 
 		_r_sys_registerrestart (FALSE);
 
@@ -2003,7 +2003,7 @@ NTSTATUS _r_autorun_enable (
 	}
 	else
 	{
-		status = _r_reg_deletevalue (hkey, _r_app_getname ());
+		status = _r_reg_deletevalue (hkey, APP_STORAGE_NAME);
 
 		if (status == STATUS_OBJECT_NAME_NOT_FOUND)
 			status = STATUS_SUCCESS;
@@ -2035,7 +2035,7 @@ BOOLEAN _r_autorun_isenabled ()
 
 	if (NT_SUCCESS (status))
 	{
-		status = _r_reg_querystring (hkey, _r_app_getname (), &path, NULL);
+		status = _r_reg_querystring (hkey, APP_STORAGE_NAME, &path, NULL);
 
 		if (NT_SUCCESS (status))
 		{
@@ -2352,7 +2352,7 @@ NTSTATUS NTAPI _r_update_checkthread (
 #pragma PR_PRINT_WARNING_UNDEFINED(IDS_UPDATE_YES)
 #endif // IDS_UPDATE_YES
 
-		_r_update_navigate (update_info, TDCBF_YES_BUTTON | TDCBF_NO_BUTTON, 0, str_content, NULL, sr.buffer, 0, ET_WINDOWS);
+		_r_update_navigate (update_info, TDCBF_YES_BUTTON | TDCBF_NO_BUTTON, 0, NULL, str_content, sr.buffer, 0, ET_WINDOWS);
 	}
 	else
 	{
@@ -2439,6 +2439,7 @@ BOOLEAN _r_update_isenabled (
 
 	return TRUE;
 }
+
 
 _Success_ (return)
 BOOLEAN _r_update_check (

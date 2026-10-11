@@ -76,6 +76,12 @@
 #define APP_LANGUAGE_DEFAULT L"English"
 #define APP_SKIPUAC_NAME APP_NAME_SHORT L"Task"
 
+// name of the settings folder (%APPDATA%\<author>\<name>) and of the autorun registry value;
+// a renamed fork can keep the old name so existing settings and autorun keep working
+#if !defined(APP_STORAGE_NAME)
+#define APP_STORAGE_NAME APP_NAME
+#endif // APP_STORAGE_NAME
+
 #if defined(APP_COMMENT)
 #pragma PR_PRINT_WARNING_DEFINE(APP_COMMENT)
 #else
